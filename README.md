@@ -1,9 +1,5 @@
 # HAE-RAG Chunking Benchmark
 
-Replication code for the two-phase RAG chunking benchmark described in:
-
-> Dolu, K.O. *Chunking Strategy Comparison for Retrieval-Augmented Generation in a Domain-Homogeneous Medical Corpus: A Benchmark Study on Hereditary Angioedema Literature.* (2026)
-
 Live demo: [chunkbench.tech](https://chunkbench.tech)
 
 ---
