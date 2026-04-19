@@ -10,7 +10,7 @@ from config import (
     EMBED_MODEL, EMBED_NORMALIZE, RETRIEVAL_K, CONTEXT_MODE,
     MAX_CONTEXT_TOKENS, MAX_CONTEXT_CHARS,
     PROMPT_TEMPLATE_RAG, PROMPT_TEMPLATE_NO_RAG,
-    CHUNKING_STRATEGIES, INDEX_BASE_DIR, S3_PHASE1_INDEX_DIR,
+    CHUNKING_STRATEGIES, PHASE_INDEX_DIRS,
 )
 from retrieval import (
     set_embed_model, deduplicate_chunks,
@@ -26,28 +26,32 @@ _llm = openai.AsyncOpenAI(
     base_url=LLM_API_BASE,
 )
 
-_collections = {}
-for _sid in ("S1", "S2", "S3", "S4"):
-    _path = Path(INDEX_BASE_DIR) / f"chroma_{_sid.lower()}"
-    if _path.exists():
-        _client = chromadb.PersistentClient(path=str(_path))
+
+def _load_collections(phase: str) -> dict:
+    cols = {}
+    for sid, path_str in PHASE_INDEX_DIRS[phase].items():
+        path = Path(path_str)
+        if not path.exists():
+            print(f"  [{phase}] {sid}: index path not found — {path}")
+            continue
         try:
-            _collections[_sid] = _client.get_collection(f"hae_{_sid.lower()}")
-        except Exception:
-            print(f"  WARNING: Collection hae_{_sid.lower()} not found")
+            client = chromadb.PersistentClient(path=str(path))
+            cols[sid] = client.get_collection(f"hae_{sid.lower()}")
+            print(f"  [{phase}] {sid}: {cols[sid].count()} chunks")
+        except Exception as e:
+            print(f"  [{phase}] {sid}: WARNING — {e}")
+    return cols
 
-# Phase 1 S3 collection (percentile/95, 3920 chunks) loaded from backup
-_s3_p1_collection = None
-_s3_p1_path = Path(S3_PHASE1_INDEX_DIR)
-if _s3_p1_path.exists():
-    try:
-        _s3_p1_client = chromadb.PersistentClient(path=str(_s3_p1_path))
-        _s3_p1_collection = _s3_p1_client.get_collection("hae_s3")
-        print("  Phase 1 S3 backup loaded.")
-    except Exception:
-        print("  WARNING: Phase 1 S3 backup collection not found")
 
-print(f"Query engine ready. Collections: {list(_collections.keys())}")
+_collections_phase1 = _load_collections("phase1")
+_collections_phase2 = _load_collections("phase2")
+
+# Demo mode uses Phase 2 indexes
+_collections_demo = _collections_phase2
+
+print(f"Query engine ready. "
+      f"Phase1={list(_collections_phase1.keys())} "
+      f"Phase2={list(_collections_phase2.keys())}")
 
 
 def embed_query(question: str) -> list[float]:
@@ -68,7 +72,7 @@ async def _run_strategy(
 ) -> dict:
     t0 = time.time()
     if collections is None:
-        collections = _collections
+        collections = _collections_phase2
 
     if strategy_id == "B0":
         retrieved_chunks = []
@@ -77,12 +81,15 @@ async def _run_strategy(
     else:
         if strategy_id not in collections:
             return {
-                "strategy_id": strategy_id,
-                "strategy_name": CHUNKING_STRATEGIES[strategy_id]["name"],
-                "answer": "Index not built yet.",
-                "retrieved_chunks": [], "context_tokens_est": 0,
-                "latency_s": 0, "prompt_tokens": 0, "completion_tokens": 0,
-                "error": "index_not_found"
+                "strategy_id":        strategy_id,
+                "strategy_name":      CHUNKING_STRATEGIES[strategy_id]["name"],
+                "answer":             "Index not built yet.",
+                "retrieved_chunks":   [],
+                "context_tokens_est": 0,
+                "latency_s":          0,
+                "prompt_tokens":      0,
+                "completion_tokens":  0,
+                "error":              "index_not_found",
             }
 
         raw = collections[strategy_id].query(
@@ -148,12 +155,12 @@ async def query_all(
     if strategies is None:
         strategies = ["S1", "S2", "S3", "S4", "B0"]
 
-    # Phase 1 mode: swap S3 to the backup collection (percentile/95, 3920 chunks)
-    if mode == "phase1" and _s3_p1_collection is not None:
-        collections = dict(_collections)
-        collections["S3"] = _s3_p1_collection
+    if mode == "phase1":
+        collections = _collections_phase1
+    elif mode == "phase2":
+        collections = _collections_phase2
     else:
-        collections = _collections
+        collections = _collections_demo
 
     query_embedding = embed_query(question)
 

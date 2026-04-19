@@ -38,21 +38,45 @@ SPACY_MODEL       = "en_core_web_sm"
 CORPUS_PDF_DIR    = str(_project_root / "corpus" / "pdfs")
 CORPUS_MANIFEST   = str(_project_root / "data" / "corpus_manifest.csv")
 INDEXED_ROLES     = {"haystack", "needle_sentinel", "needle_holdout", "haystack_distractor"}
-INDEX_BASE_DIR       = str(_project_root / "indexes")
-S3_PHASE1_INDEX_DIR  = str(_project_root / "indexes" / "chroma_s3_phase1_backup")
-S3_PHASE2_INDEX_DIR  = str(_project_root / "indexes" / "chroma_s3")
-RESULTS_DIR          = str(_project_root / "data" / "results")
+INDEX_BASE_DIR = str(_project_root / "indexes")
+RESULTS_DIR    = str(_project_root / "data" / "results")
+
+# Per-strategy index paths by phase
+PHASE_INDEX_DIRS = {
+    "phase1": {
+        "S1": str(_project_root / "indexes" / "chroma_s1_phase1_backup"),
+        "S2": str(_project_root / "indexes" / "chroma_s2_phase1_backup"),
+        "S3": str(_project_root / "indexes" / "chroma_s3_phase1_backup"),
+        "S4": str(_project_root / "indexes" / "chroma_s4"),
+    },
+    "phase2": {
+        "S1": str(_project_root / "indexes" / "chroma_s1_S1_512_20pct"),
+        "S2": str(_project_root / "indexes" / "chroma_s2_S2_1024_10pct"),
+        "S3": str(_project_root / "indexes" / "chroma_s3"),
+        "S4": str(_project_root / "indexes" / "chroma_s4"),
+    },
+}
 
 PHASE1_FROZEN = {
     "k": 10, "context_mode": "fixed-budget", "context_budget_tokens": 1800,
     "temperature": 0.0, "max_tokens": 512, "dedup": True, "dedup_threshold": 0.95,
-    "s3_index": "percentile/95", "s3_chunks": 3920,
+    "index_configs": {
+        "S1": "size=512, overlap=50 (10%) — 17,886 chunks",
+        "S2": "size=512, overlap=50 (10%) — 18,543 chunks",
+        "S3": "percentile/95 — 3,920 chunks",
+        "S4": "proposition/default — 85,537 chunks",
+    },
 }
 
 PHASE2_FROZEN = {
     "k": 10, "context_mode": "fixed-budget", "context_budget_tokens": 1800,
     "temperature": 0.0, "max_tokens": 512, "dedup": True, "dedup_threshold": 0.95,
-    "s3_index": "t85_max2000", "s3_chunks": 11305,
+    "index_configs": {
+        "S1": "size=512, overlap=102 (20%) — 20,141 chunks",
+        "S2": "size=1024, overlap=102 (10%) — 9,638 chunks",
+        "S3": "t85_max2000 — 11,305 chunks",
+        "S4": "proposition/default — 85,537 chunks",
+    },
 }
 
 # Chunking strategies

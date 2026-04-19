@@ -38,8 +38,9 @@ function App() {
   const [selectedStrategies, setSelectedStrategies] = useState(STRATEGIES)
 
   useEffect(() => {
-    fetch(`${API}/index-stats`).then(r => r.json()).then(setIndexStats).catch(() => {})
-  }, [])
+    const m = mode === 'demo' ? 'phase2' : mode
+    fetch(`${API}/index-stats?mode=${m}`).then(r => r.json()).then(setIndexStats).catch(() => {})
+  }, [mode])
 
   const handleQuery = async () => {
     if (!question.trim()) return

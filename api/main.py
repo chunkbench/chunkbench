@@ -13,7 +13,7 @@ from config import (RETRIEVAL_K, LLM_TEMPERATURE, LLM_MAX_TOKENS,
                     EMBED_MODEL, RETRIEVAL_METRIC, DEDUP_THRESHOLD,
                     MAX_CONTEXT_CHARS, MAX_CONTEXT_TOKENS, CONTEXT_MODE,
                     SPACY_MODEL, CHUNKING_STRATEGIES, INDEX_BASE_DIR,
-                    PHASE1_FROZEN, PHASE2_FROZEN)
+                    PHASE1_FROZEN, PHASE2_FROZEN, PHASE_INDEX_DIRS)
 
 app = FastAPI(title="HAE-RAG Benchmark", version="4.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"],
@@ -156,38 +156,42 @@ async def evaluate(req: EvalRequest):
 
 @app.get("/config/frozen")
 async def frozen_config(mode: str = "phase2"):
-    base = {
+    frozen = PHASE1_FROZEN if mode == "phase1" else PHASE2_FROZEN
+    return {
+        "mode":               mode,
         "embed_model":        EMBED_MODEL,
         "distance_metric":    RETRIEVAL_METRIC,
-        "dedup_threshold":    DEDUP_THRESHOLD,
+        "dedup_threshold":    frozen["dedup_threshold"],
         "dedup_timing":       "query-time",
-        "context_mode":       CONTEXT_MODE,
-        "max_context_tokens": MAX_CONTEXT_TOKENS,
+        "context_mode":       frozen["context_mode"],
+        "max_context_tokens": frozen["context_budget_tokens"],
         "context_truncation": "rank-order, whole-chunk, budget=1800tok",
-        "k":                  RETRIEVAL_K,
+        "k":                  frozen["k"],
         "sentence_splitter":  f"spacy:{SPACY_MODEL}",
+        "index_configs":      frozen["index_configs"],
         "chunking_strategies": {
             sid: {"name": v["name"], "description": v["description"]}
             for sid, v in CHUNKING_STRATEGIES.items()
         },
     }
-    if mode == "phase1":
-        base["mode"] = "phase1"
-        base["s3_index"] = PHASE1_FROZEN["s3_index"]
-        base["s3_chunks"] = PHASE1_FROZEN["s3_chunks"]
-    else:
-        base["mode"] = "phase2"
-        base["s3_index"] = PHASE2_FROZEN["s3_index"]
-        base["s3_chunks"] = PHASE2_FROZEN["s3_chunks"]
-    return base
 
 
 @app.get("/index-stats")
-async def index_stats():
+async def index_stats(mode: str = "phase2"):
+    from query_engine import _collections_phase1, _collections_phase2, _collections_demo
+    cols = _collections_phase1 if mode == "phase1" else \
+           _collections_phase2 if mode == "phase2" else _collections_demo
     stats = {}
-    for sid in ("S1", "S2", "S3", "S4"):
-        f = Path(INDEX_BASE_DIR) / f"chroma_{sid.lower()}" / "index_stats.json"
-        if f.exists(): stats[sid] = json.loads(f.read_text())
+    for sid, col in cols.items():
+        try:
+            stats[sid] = {
+                "strategy":        sid,
+                "name":            CHUNKING_STRATEGIES[sid]["name"],
+                "total_chunks":    col.count(),
+                "total_documents": 162,
+            }
+        except Exception:
+            pass
     return stats
 
 
