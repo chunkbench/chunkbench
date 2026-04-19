@@ -12,7 +12,8 @@ from query_engine import query_all
 from config import (RETRIEVAL_K, LLM_TEMPERATURE, LLM_MAX_TOKENS,
                     EMBED_MODEL, RETRIEVAL_METRIC, DEDUP_THRESHOLD,
                     MAX_CONTEXT_CHARS, MAX_CONTEXT_TOKENS, CONTEXT_MODE,
-                    SPACY_MODEL, CHUNKING_STRATEGIES, INDEX_BASE_DIR)
+                    SPACY_MODEL, CHUNKING_STRATEGIES, INDEX_BASE_DIR,
+                    PHASE1_FROZEN, PHASE2_FROZEN)
 
 app = FastAPI(title="HAE-RAG Benchmark", version="4.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"],
@@ -21,6 +22,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"],
 
 class QueryRequest(BaseModel):
     question:              str
+    mode:                  str   = "phase2"   # "phase1" | "phase2" | "demo"
     k:                     int   = RETRIEVAL_K
     context_mode:          str   = CONTEXT_MODE
     context_budget_tokens: int   = MAX_CONTEXT_TOKENS
@@ -46,6 +48,7 @@ class EvalQuestion(BaseModel):
 
 class EvalRequest(BaseModel):
     questions:             list[EvalQuestion]
+    mode:                  str   = "phase2"   # "phase1" | "phase2" | "demo"
     strategies:            list[str] = ["S1", "S2", "S3", "S4", "B0"]
     k:                     int   = RETRIEVAL_K
     context_mode:          str   = CONTEXT_MODE
@@ -86,6 +89,7 @@ async def query(req: QueryRequest):
         max_tokens=req.max_tokens, dedup=req.dedup,
         dedup_threshold=req.dedup_threshold,
         strategies=req.strategies,
+        mode=req.mode,
     )
 
 
@@ -102,6 +106,7 @@ async def evaluate(req: EvalRequest):
             context_budget_tokens=req.context_budget_tokens,
             temperature=req.temperature, max_tokens=req.max_tokens,
             dedup=req.dedup, strategies=req.strategies,
+            mode=req.mode,
         )
         q_result = {
             "q_id": q.q_id, "question": q.question,
@@ -150,8 +155,8 @@ async def evaluate(req: EvalRequest):
 
 
 @app.get("/config/frozen")
-async def frozen_config():
-    return {
+async def frozen_config(mode: str = "phase2"):
+    base = {
         "embed_model":        EMBED_MODEL,
         "distance_metric":    RETRIEVAL_METRIC,
         "dedup_threshold":    DEDUP_THRESHOLD,
@@ -159,13 +164,22 @@ async def frozen_config():
         "context_mode":       CONTEXT_MODE,
         "max_context_tokens": MAX_CONTEXT_TOKENS,
         "context_truncation": "rank-order, whole-chunk, budget=1800tok",
-        "phase1_k":           RETRIEVAL_K,
+        "k":                  RETRIEVAL_K,
         "sentence_splitter":  f"spacy:{SPACY_MODEL}",
         "chunking_strategies": {
             sid: {"name": v["name"], "description": v["description"]}
             for sid, v in CHUNKING_STRATEGIES.items()
         },
     }
+    if mode == "phase1":
+        base["mode"] = "phase1"
+        base["s3_index"] = PHASE1_FROZEN["s3_index"]
+        base["s3_chunks"] = PHASE1_FROZEN["s3_chunks"]
+    else:
+        base["mode"] = "phase2"
+        base["s3_index"] = PHASE2_FROZEN["s3_index"]
+        base["s3_chunks"] = PHASE2_FROZEN["s3_chunks"]
+    return base
 
 
 @app.get("/index-stats")

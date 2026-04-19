@@ -12,12 +12,17 @@ const STRATEGY_COLORS = {
   S4: '#f59e0b', B0: '#6b7280'
 }
 
+const FROZEN_PARAMS = {
+  k: 10, context_mode: 'fixed-budget', context_budget_tokens: 1800,
+  context_budget_chars: 6000, temperature: 0.0, max_tokens: 512,
+  dedup: true, dedup_threshold: 0.95,
+}
+
 function App() {
-  const [mode, setMode] = useState('study')
+  const [mode, setMode] = useState('phase2')
   const [question, setQuestion] = useState('')
   const [loading, setLoading] = useState(false)
   const [results, setResults] = useState(null)
-  const [frozen, setFrozen] = useState(null)
   const [indexStats, setIndexStats] = useState(null)
   const [error, setError] = useState(null)
 
@@ -33,7 +38,6 @@ function App() {
   const [selectedStrategies, setSelectedStrategies] = useState(STRATEGIES)
 
   useEffect(() => {
-    fetch(`${API}/config/frozen`).then(r => r.json()).then(setFrozen).catch(() => {})
     fetch(`${API}/index-stats`).then(r => r.json()).then(setIndexStats).catch(() => {})
   }, [])
 
@@ -42,27 +46,23 @@ function App() {
     setLoading(true)
     setError(null)
     try {
-      const body = mode === 'study' ? {
-        question: question.trim(),
-        k: 10,
-        context_mode: 'fixed-budget',
-        context_budget_tokens: 1800,
-        context_budget_chars: 6000,
-        temperature: 0.0,
-        max_tokens: 512,
-        dedup: true,
-        strategies: null,
-      } : {
-        question: question.trim(),
-        k,
-        context_mode: contextMode,
-        context_budget_tokens: contextBudgetTokens,
-        context_budget_chars: contextBudgetChars,
-        temperature,
-        max_tokens: maxTokens,
-        dedup,
-        dedup_threshold: dedup ? dedupThreshold : null,
-        strategies: selectedStrategies,
+      let body
+      if (mode === 'phase1' || mode === 'phase2') {
+        body = { question: question.trim(), mode, ...FROZEN_PARAMS, strategies: null }
+      } else {
+        body = {
+          question: question.trim(),
+          mode: 'demo',
+          k,
+          context_mode: contextMode,
+          context_budget_tokens: contextBudgetTokens,
+          context_budget_chars: contextBudgetChars,
+          temperature,
+          max_tokens: maxTokens,
+          dedup,
+          dedup_threshold: dedup ? dedupThreshold : null,
+          strategies: selectedStrategies,
+        }
       }
       const res = await fetch(`${API}/query`, {
         method: 'POST',
@@ -84,6 +84,8 @@ function App() {
     )
   }
 
+  const modeLabel = mode === 'phase1' ? 'Phase 1' : mode === 'phase2' ? 'Phase 2' : 'Demo'
+
   return (
     <div style={styles.container}>
       <header style={styles.header}>
@@ -92,27 +94,39 @@ function App() {
           Comparing chunking strategies for medical RAG in Hereditary Angioedema
         </p>
         <div style={styles.modeToggle}>
-          <button onClick={() => setMode('study')}
-            style={{...styles.modeBtn, ...(mode === 'study' ? styles.modeBtnActive : {})}}>
-            Study Mode (Phase 1)
-          </button>
-          <button onClick={() => setMode('demo')}
-            style={{...styles.modeBtn, ...(mode === 'demo' ? styles.modeBtnActive : {})}}>
-            Demo Mode
-          </button>
+          {[
+            { id: 'phase1', label: 'Phase 1' },
+            { id: 'phase2', label: 'Phase 2' },
+            { id: 'demo',   label: 'Demo' },
+          ].map(({ id, label }) => (
+            <button key={id} onClick={() => { setMode(id); setResults(null) }}
+              style={{ ...styles.modeBtn, ...(mode === id ? styles.modeBtnActive : {}) }}>
+              {label}
+            </button>
+          ))}
         </div>
       </header>
 
-      {mode === 'study' && (
+      {(mode === 'phase1' || mode === 'phase2') && (
         <div style={styles.frozenPanel}>
-          <h3 style={styles.frozenTitle}>Phase 1 — Starting-point Benchmark (Frozen)</h3>
+          <h3 style={styles.frozenTitle}>
+            {mode === 'phase1'
+              ? 'Phase 1 — Starting-point Benchmark (Frozen)'
+              : 'Phase 2 — Best-config Benchmark (Frozen)'}
+          </h3>
           <div style={styles.frozenGrid}>
             <span>Candidate depth: <strong>k=10</strong></span>
             <span>Context: <strong>1800 tokens (fixed-budget)</strong></span>
             <span>Packing: <strong>rank-order, whole-chunk</strong></span>
-            <span>Dedup: <strong>cosine {'>'}= 0.95</strong></span>
+            <span>Dedup: <strong>cosine ≥ 0.95</strong></span>
             <span>Embedding: <strong>BAAI/bge-m3</strong></span>
             <span>LLM: <strong>DeepSeek-V3, T=0.0</strong></span>
+            {mode === 'phase1' && (
+              <span>S3 index: <strong>percentile/95 — 3,920 chunks</strong></span>
+            )}
+            {mode === 'phase2' && (
+              <span>S3 index: <strong>t85_max2000 — 11,305 chunks</strong></span>
+            )}
           </div>
         </div>
       )}
@@ -137,13 +151,13 @@ function App() {
                 onChange={e => setMaxTokens(Number(e.target.value))} style={styles.slider} />
             </label>
             <div>
-              <span style={{fontSize: 14}}>Context mode: </span>
+              <span style={{ fontSize: 14 }}>Context mode: </span>
               <button onClick={() => setContextMode('fixed-k')}
-                style={{...styles.ctxBtn, ...(contextMode === 'fixed-k' ? styles.ctxBtnActive : {})}}>
+                style={{ ...styles.ctxBtn, ...(contextMode === 'fixed-k' ? styles.ctxBtnActive : {}) }}>
                 fixed-k
               </button>
               <button onClick={() => setContextMode('fixed-budget')}
-                style={{...styles.ctxBtn, ...(contextMode === 'fixed-budget' ? styles.ctxBtnActive : {})}}>
+                style={{ ...styles.ctxBtn, ...(contextMode === 'fixed-budget' ? styles.ctxBtnActive : {}) }}>
                 fixed-budget
               </button>
             </div>
@@ -178,7 +192,7 @@ function App() {
               <label key={sid} style={styles.checkLabel}>
                 <input type="checkbox" checked={selectedStrategies.includes(sid)}
                   onChange={() => toggleStrategy(sid)} />
-                <span style={{color: STRATEGY_COLORS[sid], fontWeight: 'bold'}}>{sid}</span>
+                <span style={{ color: STRATEGY_COLORS[sid], fontWeight: 'bold' }}>{sid}</span>
                 {' '}{STRATEGY_NAMES[sid]}
               </label>
             ))}
@@ -188,14 +202,14 @@ function App() {
 
       <div style={styles.querySection}>
         <textarea value={question} onChange={e => setQuestion(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleQuery() }}}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleQuery() } }}
           placeholder="Ask a question about HAE..."
           style={styles.textarea} rows={3} />
         <button onClick={handleQuery} disabled={loading || !question.trim()} style={styles.queryBtn}>
           {loading ? 'Querying...' : 'Query All Strategies'}
         </button>
-        {mode === 'study' && (
-          <span style={styles.studyBadge}>Phase 1: k=10, budget=1800tok, dedup=0.95</span>
+        {(mode === 'phase1' || mode === 'phase2') && (
+          <span style={styles.frozenBadge}>{modeLabel}: k=10, budget=1800tok, dedup=0.95</span>
         )}
       </div>
 
@@ -206,9 +220,9 @@ function App() {
           <h2 style={styles.resultsTitle}>Results</h2>
           <div style={styles.strategyGrid}>
             {Object.entries(results.results).map(([sid, r]) => (
-              <div key={sid} style={{...styles.strategyCard, borderTopColor: STRATEGY_COLORS[sid]}}>
+              <div key={sid} style={{ ...styles.strategyCard, borderTopColor: STRATEGY_COLORS[sid] }}>
                 <div style={styles.cardHeader}>
-                  <span style={{...styles.strategyBadge, backgroundColor: STRATEGY_COLORS[sid]}}>{sid}</span>
+                  <span style={{ ...styles.strategyBadge, backgroundColor: STRATEGY_COLORS[sid] }}>{sid}</span>
                   <span style={styles.strategyName}>{r.strategy_name}</span>
                   <span style={styles.latency}>{r.latency_s}s</span>
                 </div>
@@ -243,7 +257,7 @@ function App() {
           <div style={styles.statsGrid}>
             {Object.entries(indexStats).map(([sid, s]) => (
               <div key={sid} style={styles.statCard}>
-                <strong style={{color: STRATEGY_COLORS[sid]}}>{sid}: {s.name}</strong>
+                <strong style={{ color: STRATEGY_COLORS[sid] }}>{sid}: {s.name}</strong>
                 <br />{s.total_documents} docs | {s.total_chunks} chunks
               </div>
             ))}
@@ -280,7 +294,7 @@ const styles = {
   querySection: { marginBottom: 24 },
   textarea: { width: '100%', padding: 12, fontSize: 15, border: '2px solid #e2e8f0', borderRadius: 8, resize: 'vertical', fontFamily: 'inherit', boxSizing: 'border-box' },
   queryBtn: { marginTop: 8, padding: '10px 24px', fontSize: 15, fontWeight: 600, background: '#1a1a2e', color: 'white', border: 'none', borderRadius: 8, cursor: 'pointer' },
-  studyBadge: { marginLeft: 12, fontSize: 12, color: '#64748b', background: '#f1f5f9', padding: '4px 10px', borderRadius: 4 },
+  frozenBadge: { marginLeft: 12, fontSize: 12, color: '#64748b', background: '#f1f5f9', padding: '4px 10px', borderRadius: 4 },
   error: { background: '#fef2f2', color: '#dc2626', padding: 12, borderRadius: 8, marginBottom: 16 },
   resultsSection: { marginTop: 16 },
   resultsTitle: { fontSize: 20, marginBottom: 16 },

@@ -10,7 +10,7 @@ from config import (
     EMBED_MODEL, EMBED_NORMALIZE, RETRIEVAL_K, CONTEXT_MODE,
     MAX_CONTEXT_TOKENS, MAX_CONTEXT_CHARS,
     PROMPT_TEMPLATE_RAG, PROMPT_TEMPLATE_NO_RAG,
-    CHUNKING_STRATEGIES, INDEX_BASE_DIR,
+    CHUNKING_STRATEGIES, INDEX_BASE_DIR, S3_PHASE1_INDEX_DIR,
 )
 from retrieval import (
     set_embed_model, deduplicate_chunks,
@@ -36,6 +36,17 @@ for _sid in ("S1", "S2", "S3", "S4"):
         except Exception:
             print(f"  WARNING: Collection hae_{_sid.lower()} not found")
 
+# Phase 1 S3 collection (percentile/95, 3920 chunks) loaded from backup
+_s3_p1_collection = None
+_s3_p1_path = Path(S3_PHASE1_INDEX_DIR)
+if _s3_p1_path.exists():
+    try:
+        _s3_p1_client = chromadb.PersistentClient(path=str(_s3_p1_path))
+        _s3_p1_collection = _s3_p1_client.get_collection("hae_s3")
+        print("  Phase 1 S3 backup loaded.")
+    except Exception:
+        print("  WARNING: Phase 1 S3 backup collection not found")
+
 print(f"Query engine ready. Collections: {list(_collections.keys())}")
 
 
@@ -53,15 +64,18 @@ async def _run_strategy(
     max_tokens: int = LLM_MAX_TOKENS,
     dedup: bool = True,
     dedup_threshold: float = None,
+    collections: dict = None,
 ) -> dict:
     t0 = time.time()
+    if collections is None:
+        collections = _collections
 
     if strategy_id == "B0":
         retrieved_chunks = []
         prompt = PROMPT_TEMPLATE_NO_RAG.format(question=question)
         context_tokens = 0
     else:
-        if strategy_id not in _collections:
+        if strategy_id not in collections:
             return {
                 "strategy_id": strategy_id,
                 "strategy_name": CHUNKING_STRATEGIES[strategy_id]["name"],
@@ -71,7 +85,7 @@ async def _run_strategy(
                 "error": "index_not_found"
             }
 
-        raw = _collections[strategy_id].query(
+        raw = collections[strategy_id].query(
             query_embeddings=[query_embedding],
             n_results=k,
             include=["documents", "metadatas", "distances"],
@@ -129,9 +143,17 @@ async def query_all(
     dedup: bool = True,
     dedup_threshold: float = None,
     strategies: list[str] = None,
+    mode: str = "phase2",
 ) -> dict:
     if strategies is None:
         strategies = ["S1", "S2", "S3", "S4", "B0"]
+
+    # Phase 1 mode: swap S3 to the backup collection (percentile/95, 3920 chunks)
+    if mode == "phase1" and _s3_p1_collection is not None:
+        collections = dict(_collections)
+        collections["S3"] = _s3_p1_collection
+    else:
+        collections = _collections
 
     query_embedding = embed_query(question)
 
@@ -141,19 +163,13 @@ async def query_all(
                       context_budget_tokens=context_budget_tokens,
                       context_budget_chars=context_budget_chars,
                       temperature=temperature, max_tokens=max_tokens,
-                      dedup=dedup, dedup_threshold=dedup_threshold)
+                      dedup=dedup, dedup_threshold=dedup_threshold,
+                      collections=collections)
         for sid in strategies
     ])
 
-    is_study_mode = (
-        k == RETRIEVAL_K and context_mode == CONTEXT_MODE and
-        context_budget_tokens == MAX_CONTEXT_TOKENS and
-        temperature == LLM_TEMPERATURE and max_tokens == LLM_MAX_TOKENS and
-        dedup is True and strategies is None
-    )
-
     return {
-        "question":      question,
-        "is_study_mode": is_study_mode,
-        "results":       {r["strategy_id"]: r for r in results},
+        "question": question,
+        "mode":     mode,
+        "results":  {r["strategy_id"]: r for r in results},
     }

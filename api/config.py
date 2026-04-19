@@ -38,8 +38,22 @@ SPACY_MODEL       = "en_core_web_sm"
 CORPUS_PDF_DIR    = str(_project_root / "corpus" / "pdfs")
 CORPUS_MANIFEST   = str(_project_root / "data" / "corpus_manifest.csv")
 INDEXED_ROLES     = {"haystack", "needle_sentinel", "needle_holdout", "haystack_distractor"}
-INDEX_BASE_DIR    = str(_project_root / "indexes")
-RESULTS_DIR       = str(_project_root / "data" / "results")
+INDEX_BASE_DIR       = str(_project_root / "indexes")
+S3_PHASE1_INDEX_DIR  = str(_project_root / "indexes" / "chroma_s3_phase1_backup")
+S3_PHASE2_INDEX_DIR  = str(_project_root / "indexes" / "chroma_s3")
+RESULTS_DIR          = str(_project_root / "data" / "results")
+
+PHASE1_FROZEN = {
+    "k": 10, "context_mode": "fixed-budget", "context_budget_tokens": 1800,
+    "temperature": 0.0, "max_tokens": 512, "dedup": True, "dedup_threshold": 0.95,
+    "s3_index": "percentile/95", "s3_chunks": 3920,
+}
+
+PHASE2_FROZEN = {
+    "k": 10, "context_mode": "fixed-budget", "context_budget_tokens": 1800,
+    "temperature": 0.0, "max_tokens": 512, "dedup": True, "dedup_threshold": 0.95,
+    "s3_index": "t85_max2000", "s3_chunks": 11305,
+}
 
 # Chunking strategies
 CHUNKING_STRATEGIES = {
