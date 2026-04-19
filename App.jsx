@@ -122,12 +122,22 @@ function App() {
             <span>Dedup: <strong>cosine ≥ 0.95</strong></span>
             <span>Embedding: <strong>BAAI/bge-m3</strong></span>
             <span>LLM: <strong>DeepSeek-V3, T=0.0</strong></span>
-            {mode === 'phase1' && (
-              <span>S3 index: <strong>percentile/95 — 3,920 chunks</strong></span>
-            )}
-            {mode === 'phase2' && (
-              <span>S3 index: <strong>t85_max2000 — 11,305 chunks</strong></span>
-            )}
+          </div>
+          <div style={styles.strategyParamGrid}>
+            {mode === 'phase1' && <>
+              <div style={styles.stratParamCard}><strong>S1</strong> Fixed-size · size=512, overlap=50 (10%) · 17,886 chunks</div>
+              <div style={styles.stratParamCard}><strong>S2</strong> Recursive · size=512, overlap=50 (10%) · 18,543 chunks</div>
+              <div style={styles.stratParamCard}><strong>S3</strong> Semantic · percentile/95 · 3,920 chunks</div>
+              <div style={styles.stratParamCard}><strong>S4</strong> Proposition · LLM decomp, default · 85,537 chunks</div>
+              <div style={styles.stratParamCard}><strong>B0</strong> No-RAG baseline · no retrieval</div>
+            </>}
+            {mode === 'phase2' && <>
+              <div style={styles.stratParamCard}><strong>S1</strong> Fixed-size · size=512, overlap=102 (20%) · 20,141 chunks</div>
+              <div style={styles.stratParamCard}><strong>S2</strong> Recursive · size=1024, overlap=102 (10%) · 9,638 chunks</div>
+              <div style={styles.stratParamCard}><strong>S3</strong> Semantic · threshold=85, max=2000 · 11,305 chunks</div>
+              <div style={styles.stratParamCard}><strong>S4</strong> Proposition · LLM decomp, no tunable params · 85,537 chunks</div>
+              <div style={styles.stratParamCard}><strong>B0</strong> No-RAG baseline · no retrieval</div>
+            </>}
           </div>
         </div>
       )}
@@ -283,7 +293,9 @@ const styles = {
   modeBtnActive: { background: '#1a1a2e', color: 'white', borderColor: '#1a1a2e' },
   frozenPanel: { background: '#f1f5f9', border: '1px solid #e2e8f0', borderRadius: 8, padding: 16, marginBottom: 16 },
   frozenTitle: { margin: '0 0 8px', fontSize: 14, color: '#475569' },
-  frozenGrid: { display: 'flex', flexWrap: 'wrap', gap: '8px 24px', fontSize: 13, color: '#64748b' },
+  frozenGrid: { display: 'flex', flexWrap: 'wrap', gap: '8px 24px', fontSize: 13, color: '#64748b', marginBottom: 10 },
+  strategyParamGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 6, marginTop: 4 },
+  stratParamCard: { background: 'white', border: '1px solid #e2e8f0', borderRadius: 5, padding: '5px 10px', fontSize: 12, color: '#475569' },
   paramPanel: { background: 'white', border: '1px solid #e2e8f0', borderRadius: 8, padding: 16, marginBottom: 16 },
   paramTitle: { margin: '0 0 12px', fontSize: 14, color: '#475569' },
   paramGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 },
