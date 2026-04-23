@@ -66,16 +66,22 @@ class EvalRequest(BaseModel):
     dedup:                 bool  = True
 
 
-def check_hit(gold_span, chunks, k):
-    if not gold_span or not chunks: return 0
-    gold = " ".join(gold_span.lower().split())[:120]
-    return int(any(gold in " ".join(c["text"].lower().split()) for c in chunks[:k]))
+def _norm_doc(d):
+    if not d: return d
+    if d.endswith(".pdf"): d = d[:-4]
+    return d.replace("_shallow", "").replace("_deep", "")
 
-def reciprocal_rank(gold_span, chunks):
-    if not gold_span or not chunks: return 0.0
-    gold = " ".join(gold_span.lower().split())[:120]
+def check_hit(source_doc, chunks, k):
+    if not source_doc or not chunks: return 0
+    src = _norm_doc(source_doc)
+    return int(any(_norm_doc(c.get("doc_id","")) == src for c in chunks[:k]))
+
+def reciprocal_rank(source_doc, chunks):
+    if not source_doc or not chunks: return 0.0
+    src = _norm_doc(source_doc)
     for i, c in enumerate(chunks):
-        if gold in " ".join(c["text"].lower().split()): return 1.0 / (i + 1)
+        if _norm_doc(c.get("doc_id","")) == src:
+            return 1.0 / (i + 1)
     return 0.0
 
 
@@ -124,22 +130,22 @@ async def evaluate(req: EvalRequest):
         }
         for sid, r in result["results"].items():
             chunks = r["retrieved_chunks"]
-            has_gold = q.gold_span is not None
+            has_source = q.source_doc is not None
             q_result["strategies"][sid] = {
                 "answer":         r["answer"],
                 "latency_s":      r["latency_s"],
                 "context_tokens": r.get("context_tokens_est", 0),
-                "hit_at_1":  check_hit(q.gold_span, chunks, 1) if has_gold else None,
-                "hit_at_3":  check_hit(q.gold_span, chunks, 3) if has_gold else None,
-                "hit_at_5":  check_hit(q.gold_span, chunks, 5) if has_gold else None,
-                "mrr":       reciprocal_rank(q.gold_span, chunks) if has_gold else None,
+                "hit_at_1":  check_hit(q.source_doc, chunks, 1) if has_source else None,
+                "hit_at_3":  check_hit(q.source_doc, chunks, 3) if has_source else None,
+                "hit_at_5":  check_hit(q.source_doc, chunks, 5) if has_source else None,
+                "mrr":       reciprocal_rank(q.source_doc, chunks) if has_source else None,
                 "top_chunks": [{"rank": c["rank"], "doc_id": c["doc_id"],
                                 "text": c["text"][:300]} for c in chunks[:3]],
             }
         all_results.append(q_result)
         await asyncio.sleep(0.3)
 
-    scored = [r for r in all_results if r["gold_span"]]
+    scored = [r for r in all_results if r.get("source_doc")]
     aggregate = {}
     for sid in req.strategies:
         if sid == "B0":

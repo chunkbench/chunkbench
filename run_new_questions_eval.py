@@ -65,30 +65,35 @@ def load_questions():
     return questions
 
 
-def check_hit(gold_span, chunks, k):
-    if not gold_span or not chunks:
+def _norm(d):
+    if not d: return d
+    if d.endswith(".pdf"): d = d[:-4]
+    return d.replace("_shallow", "").replace("_deep", "")
+
+def check_hit(source_doc, chunks, k):
+    if not source_doc or not chunks:
         return 0
-    gold = " ".join(gold_span.lower().split())[:120]
-    return int(any(gold in " ".join(c["text"].lower().split()) for c in chunks[:k]))
+    src = _norm(source_doc)
+    return int(any(_norm(c.get("doc_id","")) == src for c in chunks[:k]))
 
 
-def reciprocal_rank(gold_span, chunks):
-    if not gold_span or not chunks:
+def reciprocal_rank(source_doc, chunks):
+    if not source_doc or not chunks:
         return 0.0
-    gold = " ".join(gold_span.lower().split())[:120]
+    src = _norm(source_doc)
     for i, c in enumerate(chunks):
-        if gold in " ".join(c["text"].lower().split()):
+        if _norm(c.get("doc_id","")) == src:
             return 1.0 / (i + 1)
     return 0.0
 
 
-def score_strategy(strat_result, gold_span, gold_span_2=None):
+def score_strategy(strat_result, source_doc, source_doc_b=None):
     chunks = strat_result.get("retrieved_chunks", [])
     out = {
-        "hit_at_1":          check_hit(gold_span, chunks, 1),
-        "hit_at_3":          check_hit(gold_span, chunks, 3),
-        "hit_at_5":          check_hit(gold_span, chunks, 5),
-        "mrr":               reciprocal_rank(gold_span, chunks),
+        "hit_at_1":          check_hit(source_doc, chunks, 1),
+        "hit_at_3":          check_hit(source_doc, chunks, 3),
+        "hit_at_5":          check_hit(source_doc, chunks, 5),
+        "mrr":               reciprocal_rank(source_doc, chunks),
         "retrieved_doc_ids": list(dict.fromkeys(c["doc_id"] for c in chunks)),
         "top3_chunks": [
             {
@@ -104,9 +109,9 @@ def score_strategy(strat_result, gold_span, gold_span_2=None):
         "answer":         strat_result.get("answer", ""),
         "prompt_tokens":  strat_result.get("prompt_tokens", 0),
     }
-    if gold_span_2:
-        out["hit_at_5_span2"] = check_hit(gold_span_2, chunks, 5)
-        out["mrr_span2"]      = reciprocal_rank(gold_span_2, chunks)
+    if source_doc_b:
+        out["hit_at_5_doc_b"] = check_hit(source_doc_b, chunks, 5)
+        out["mrr_doc_b"]      = reciprocal_rank(source_doc_b, chunks)
         out["both_hit_at_5"]  = int(out["hit_at_5"] == 1 and out["hit_at_5_span2"] == 1)
     return out
 
@@ -169,7 +174,7 @@ def run_eval(resume=False):
                 for sid in PHASE1_STRATEGIES:
                     if sid in p1:
                         result["phase1"][sid] = score_strategy(
-                            p1[sid], q["gold_span"], q["gold_span_2"]
+                            p1[sid], q["source_doc"], q.get("source_doc_b")
                         )
                 elapsed = round(time.time() - t_q, 1)
                 print(f"ok ({elapsed}s)", flush=True)
@@ -191,7 +196,7 @@ def run_eval(resume=False):
                 for sid in PHASE2_NEW_STRATS:
                     if sid in p2:
                         result["phase2"][sid] = score_strategy(
-                            p2[sid], q["gold_span"], q["gold_span_2"]
+                            p2[sid], q["source_doc"], q.get("source_doc_b")
                         )
                 # S4 and B0 are identical in phase2 — copy from phase1
                 for sid in ["S4", "B0"]:
@@ -277,7 +282,7 @@ def generate_excel(results):
     ws.title = "Summary"
     ws.append(["New Questions Evaluation — Phase 1 vs Phase 2"])
     ws.append([f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}"])
-    ws.append([f"Total questions: {len(results)}  |  Scoring: gold_span exact substring match"])
+    ws.append([f"Total questions: {len(results)}  |  Scoring: doc-level (source_doc in top-k retrieved doc_ids)"])
     ws.append([])
 
     for phase in ["phase1", "phase2"]:

@@ -29,25 +29,31 @@ STRATS = ["S1", "S2", "S3", "S4", "B0"]
 def clean(s):
     return re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', s) if isinstance(s, str) else s
 
-def check_hit(gold, chunks, k):
-    if not gold or not chunks: return 0
-    g = " ".join(gold.lower().split())[:120]
-    return int(any(g in " ".join(c["text"].lower().split()) for c in chunks[:k]))
+def _norm(d):
+    if not d: return d
+    if d.endswith(".pdf"): d = d[:-4]
+    return d.replace("_shallow", "").replace("_deep", "")
 
-def calc_mrr(gold, chunks):
-    if not gold or not chunks: return 0.0
-    g = " ".join(gold.lower().split())[:120]
+def check_hit(source_doc, chunks, k):
+    if not source_doc or not chunks: return 0
+    src = _norm(source_doc)
+    return int(any(_norm(c.get("doc_id","")) == src for c in chunks[:k]))
+
+def calc_mrr(source_doc, chunks):
+    if not source_doc or not chunks: return 0.0
+    src = _norm(source_doc)
     for i, c in enumerate(chunks):
-        if g in " ".join(c["text"].lower().split()): return 1.0 / (i + 1)
+        if _norm(c.get("doc_id","")) == src:
+            return 1.0 / (i + 1)
     return 0.0
 
-def score(sr, gold_span):
+def score(sr, source_doc):
     chunks = sr.get("retrieved_chunks", [])
     return {
-        "hit_at_1":          check_hit(gold_span, chunks, 1),
-        "hit_at_3":          check_hit(gold_span, chunks, 3),
-        "hit_at_5":          check_hit(gold_span, chunks, 5),
-        "mrr":               calc_mrr(gold_span, chunks),
+        "hit_at_1":          check_hit(source_doc, chunks, 1),
+        "hit_at_3":          check_hit(source_doc, chunks, 3),
+        "hit_at_5":          check_hit(source_doc, chunks, 5),
+        "mrr":               calc_mrr(source_doc, chunks),
         "retrieved_doc_ids": list(dict.fromkeys(c["doc_id"] for c in chunks)),
         "top3_chunks": [{"rank": c["rank"], "doc_id": c["doc_id"],
                          "distance": round(c.get("distance", 0), 4),
@@ -97,7 +103,7 @@ def run_eval(resume=False):
                 p2 = call_query(q["question"], "phase2", STRATS)
                 for sid in STRATS:
                     if sid in p2:
-                        res["phase2"][sid] = score(p2[sid], q["gold_span"])
+                        res["phase2"][sid] = score(p2[sid], q["source_doc"])
                 elapsed = round(time.time() - t0, 1)
                 hits = " ".join(f"{s}:{'Y' if res['phase2'].get(s,{}).get('hit_at_5')==1 else 'N'}"
                                 for s in ["S1","S2","S3","S4"])
