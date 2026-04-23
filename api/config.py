@@ -5,43 +5,35 @@ from dotenv import load_dotenv
 _project_root = Path(__file__).resolve().parent.parent
 load_dotenv(_project_root / ".env")
 
-# LLM
 LLM_MODEL         = "deepseek-chat"
 LLM_API_BASE      = "https://api.deepseek.com/v1"
 LLM_TEMPERATURE   = 0.0
 LLM_MAX_TOKENS    = 512
 LLM_THINKING_MODE = False
 
-# Embedding (Tier-1 FROZEN)
 EMBED_MODEL       = "BAAI/bge-m3"
 EMBED_DEVICE      = "cpu"
 EMBED_BATCH_SIZE  = 32
 EMBED_NORMALIZE   = True
 
-# Retrieval
 RETRIEVAL_K       = 10
 RETRIEVAL_METRIC  = "cosine"
 
-# Deduplication (query-time, Tier-1 FROZEN)
 DEDUP_ENABLED     = True
 DEDUP_THRESHOLD   = 0.95
 
-# Context assembly
 CONTEXT_MODE       = "fixed-budget"
 MAX_CONTEXT_TOKENS = 1800
 MAX_CONTEXT_CHARS  = 6000
 
-# Sentence splitter for S3 (Tier-1 FROZEN)
 SPACY_MODEL       = "en_core_web_sm"
 
-# Corpus
 CORPUS_PDF_DIR    = str(_project_root / "corpus" / "pdfs")
 CORPUS_MANIFEST   = str(_project_root / "data" / "corpus_manifest.csv")
 INDEXED_ROLES     = {"haystack", "needle_sentinel", "needle_holdout", "haystack_distractor"}
-INDEX_BASE_DIR = str(_project_root / "indexes")
-RESULTS_DIR    = str(_project_root / "data" / "results")
+INDEX_BASE_DIR    = str(_project_root / "indexes")
+RESULTS_DIR       = str(_project_root / "data" / "results")
 
-# Per-strategy index paths by phase
 PHASE_INDEX_DIRS = {
     "phase1": {
         "S1": str(_project_root / "indexes" / "chroma_s1_phase1_backup"),
@@ -79,7 +71,6 @@ PHASE2_FROZEN = {
     },
 }
 
-# Chunking strategies
 CHUNKING_STRATEGIES = {
     "S1": {
         "name":          "Fixed-size",

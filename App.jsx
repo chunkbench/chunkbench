@@ -18,6 +18,35 @@ const FROZEN_PARAMS = {
   dedup: true, dedup_threshold: 0.95,
 }
 
+const RAGAS_METRICS = [
+  { key: 'faithfulness',          label: 'Faithfulness',           desc: 'Answer claims are supported by retrieved context' },
+  { key: 'context_precision',     label: 'Context Precision',      desc: 'Fraction of retrieved chunks that are relevant' },
+  { key: 'context_utilization',   label: 'Context Utilization',    desc: 'Answer actually uses the available context' },
+  { key: 'context_relevance',     label: 'Context Relevance',      desc: 'Retrieved chunks are relevant to the question' },
+  { key: 'response_groundedness', label: 'Response Groundedness',  desc: 'Response is traceable to / grounded in the context' },
+  { key: 'ragas_score',           label: 'RAGAS Score',            desc: 'Mean of the 5 reference-free metrics above' },
+]
+
+function scoreColor(v) {
+  if (v === null || v === undefined) return '#94a3b8'
+  if (v >= 0.7) return '#16a34a'
+  if (v >= 0.4) return '#d97706'
+  return '#dc2626'
+}
+
+function ScoreBar({ value }) {
+  if (value === null || value === undefined) return <span style={{ color: '#94a3b8' }}>—</span>
+  const pct = Math.round(value * 100)
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div style={{ flex: 1, height: 8, background: '#e2e8f0', borderRadius: 4, overflow: 'hidden' }}>
+        <div style={{ width: `${pct}%`, height: '100%', background: scoreColor(value), borderRadius: 4 }} />
+      </div>
+      <span style={{ fontSize: 12, fontWeight: 600, color: scoreColor(value), minWidth: 32 }}>{pct}%</span>
+    </div>
+  )
+}
+
 function App() {
   const [mode, setMode] = useState('phase2')
   const [question, setQuestion] = useState('')
@@ -25,6 +54,12 @@ function App() {
   const [results, setResults] = useState(null)
   const [indexStats, setIndexStats] = useState(null)
   const [error, setError] = useState(null)
+
+  // RAGAS state
+  const [ragasEnabled, setRagasEnabled] = useState(false)
+  const [ragasLoading, setRagasLoading] = useState(false)
+  const [ragasResults, setRagasResults] = useState(null)
+  const [ragasError, setRagasError] = useState(null)
 
   // Demo mode controls
   const [k, setK] = useState(10)
@@ -46,32 +81,52 @@ function App() {
     if (!question.trim()) return
     setLoading(true)
     setError(null)
+    setRagasResults(null)
+    setRagasError(null)
     try {
       let body
       if (mode === 'phase1' || mode === 'phase2') {
         body = { question: question.trim(), mode, ...FROZEN_PARAMS, strategies: null }
       } else {
         body = {
-          question: question.trim(),
-          mode: 'demo',
-          k,
+          question: question.trim(), mode: 'demo', k,
           context_mode: contextMode,
           context_budget_tokens: contextBudgetTokens,
           context_budget_chars: contextBudgetChars,
-          temperature,
-          max_tokens: maxTokens,
-          dedup,
+          temperature, max_tokens: maxTokens, dedup,
           dedup_threshold: dedup ? dedupThreshold : null,
           strategies: selectedStrategies,
         }
       }
       const res = await fetch(`${API}/query`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      setResults(await res.json())
+      const data = await res.json()
+      setResults(data)
+
+      // If RAGAS enabled, run evaluation using the already-fetched results
+      if (ragasEnabled) {
+        setRagasLoading(true)
+        try {
+          const ragasRes = await fetch(`${API}/ragas`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              question: question.trim(),
+              mode: body.mode,
+              strategy_results: data.results,
+            }),
+          })
+          if (!ragasRes.ok) throw new Error(`RAGAS HTTP ${ragasRes.status}`)
+          const ragasData = await ragasRes.json()
+          setRagasResults(ragasData.ragas)
+        } catch (e) {
+          setRagasError(e.message)
+        } finally {
+          setRagasLoading(false)
+        }
+      }
     } catch (e) {
       setError(e.message)
     } finally {
@@ -86,6 +141,7 @@ function App() {
   }
 
   const modeLabel = mode === 'phase1' ? 'Phase 1' : mode === 'phase2' ? 'Phase 2' : 'Demo'
+  const activeStrategies = results ? Object.keys(results.results) : STRATEGIES
 
   return (
     <div style={styles.container}>
@@ -100,7 +156,7 @@ function App() {
             { id: 'phase2', label: 'Phase 2' },
             { id: 'demo',   label: 'Demo' },
           ].map(({ id, label }) => (
-            <button key={id} onClick={() => { setMode(id); setResults(null) }}
+            <button key={id} onClick={() => { setMode(id); setResults(null); setRagasResults(null) }}
               style={{ ...styles.modeBtn, ...(mode === id ? styles.modeBtnActive : {}) }}>
               {label}
             </button>
@@ -216,12 +272,25 @@ function App() {
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleQuery() } }}
           placeholder="Ask a question about HAE..."
           style={styles.textarea} rows={3} />
-        <button onClick={handleQuery} disabled={loading || !question.trim()} style={styles.queryBtn}>
-          {loading ? 'Querying...' : 'Query All Strategies'}
-        </button>
-        {(mode === 'phase1' || mode === 'phase2') && (
-          <span style={styles.frozenBadge}>{modeLabel}: k=10, budget=1800tok, dedup=0.95</span>
-        )}
+        <div style={styles.queryActions}>
+          <button onClick={handleQuery} disabled={loading || !question.trim()} style={styles.queryBtn}>
+            {loading ? 'Querying...' : 'Query All Strategies'}
+          </button>
+          {(mode === 'phase1' || mode === 'phase2') && (
+            <span style={styles.frozenBadge}>{modeLabel}: k=10, budget=1800tok, dedup=0.95</span>
+          )}
+          <label style={{ ...styles.checkLabel, marginLeft: 'auto' }}>
+            <input
+              type="checkbox"
+              checked={ragasEnabled}
+              onChange={e => { setRagasEnabled(e.target.checked); setRagasResults(null) }}
+            />
+            <span style={{ fontSize: 13, color: '#475569' }}>
+              RAGAS evaluation
+              <span style={{ fontSize: 11, color: '#94a3b8', marginLeft: 4 }}>(slower)</span>
+            </span>
+          </label>
+        </div>
       </div>
 
       {error && <div style={styles.error}>{error}</div>}
@@ -262,6 +331,63 @@ function App() {
         </div>
       )}
 
+      {/* RAGAS Section */}
+      {ragasEnabled && results && (
+        <div style={styles.ragasSection}>
+          <div style={styles.ragasHeader}>
+            <h3 style={styles.ragasTitle}>RAGAS Evaluation</h3>
+            <span style={styles.ragasSubtitle}>
+              RAGAS library metrics · DeepSeek-V3 · {modeLabel}
+            </span>
+            {ragasLoading && <span style={styles.ragasLoading}>Computing...</span>}
+          </div>
+
+          {ragasError && <div style={styles.error}>{ragasError}</div>}
+
+          {ragasResults && (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={styles.ragasTable}>
+                <thead>
+                  <tr>
+                    <th style={styles.ragasTh}>Strategy</th>
+                    {RAGAS_METRICS.map(m => (
+                      <th key={m.key} style={styles.ragasTh} title={m.desc}>{m.label}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {activeStrategies.map(sid => {
+                    const scores = ragasResults[sid] || {}
+                    return (
+                      <tr key={sid} style={styles.ragasTr}>
+                        <td style={styles.ragasTd}>
+                          <span style={{ ...styles.strategyBadge, backgroundColor: STRATEGY_COLORS[sid] }}>
+                            {sid}
+                          </span>
+                          <span style={{ fontSize: 12, marginLeft: 6, color: '#64748b' }}>
+                            {STRATEGY_NAMES[sid]}
+                          </span>
+                        </td>
+                        {RAGAS_METRICS.map(m => (
+                          <td key={m.key} style={{ ...styles.ragasTd, minWidth: 120 }}>
+                            <ScoreBar value={scores[m.key]} />
+                          </td>
+                        ))}
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+              <p style={styles.ragasNote}>
+                All five metrics are <strong>reference-free</strong> (no gold answer required) — derived solely from question, answer, and retrieved chunks.{' '}
+                <strong>RAGAS Score</strong> = mean of the five.{' '}
+                <em>Answer Relevancy excluded (requires embeddings endpoint).</em>
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
       {indexStats && Object.keys(indexStats).length > 0 && (
         <div style={styles.statsPanel}>
           <h3 style={styles.statsTitle}>Index Statistics</h3>
@@ -276,9 +402,6 @@ function App() {
         </div>
       )}
 
-      <footer style={styles.footer}>
-        HAE-RAG Chunking Benchmark v4.0
-      </footer>
     </div>
   )
 }
@@ -305,9 +428,10 @@ const styles = {
   ctxBtn: { padding: '4px 12px', border: '1px solid #cbd5e1', borderRadius: 4, cursor: 'pointer', background: 'white', fontSize: 13, marginLeft: 4 },
   ctxBtnActive: { background: '#1a1a2e', color: 'white', borderColor: '#1a1a2e' },
   querySection: { marginBottom: 24 },
+  queryActions: { display: 'flex', alignItems: 'center', gap: 12, marginTop: 8, flexWrap: 'wrap' },
   textarea: { width: '100%', padding: 12, fontSize: 15, border: '2px solid #e2e8f0', borderRadius: 8, resize: 'vertical', fontFamily: 'inherit', boxSizing: 'border-box' },
-  queryBtn: { marginTop: 8, padding: '10px 24px', fontSize: 15, fontWeight: 600, background: '#1a1a2e', color: 'white', border: 'none', borderRadius: 8, cursor: 'pointer' },
-  frozenBadge: { marginLeft: 12, fontSize: 12, color: '#64748b', background: '#f1f5f9', padding: '4px 10px', borderRadius: 4 },
+  queryBtn: { padding: '10px 24px', fontSize: 15, fontWeight: 600, background: '#1a1a2e', color: 'white', border: 'none', borderRadius: 8, cursor: 'pointer', whiteSpace: 'nowrap' },
+  frozenBadge: { fontSize: 12, color: '#64748b', background: '#f1f5f9', padding: '4px 10px', borderRadius: 4 },
   error: { background: '#fef2f2', color: '#dc2626', padding: 12, borderRadius: 8, marginBottom: 16 },
   resultsSection: { marginTop: 16 },
   resultsTitle: { fontSize: 20, marginBottom: 16 },
@@ -325,11 +449,20 @@ const styles = {
   chunkMeta: { color: '#94a3b8', marginBottom: 4, fontSize: 11 },
   chunkText: { color: '#475569', lineHeight: 1.4 },
   cardError: { color: '#dc2626', fontSize: 12, marginTop: 8 },
+  ragasSection: { marginTop: 32, background: 'white', border: '1px solid #e2e8f0', borderRadius: 8, padding: 20 },
+  ragasHeader: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' },
+  ragasTitle: { margin: 0, fontSize: 17, fontWeight: 700, color: '#1a1a2e' },
+  ragasSubtitle: { fontSize: 12, color: '#64748b' },
+  ragasLoading: { fontSize: 12, color: '#f59e0b', fontWeight: 600, animation: 'pulse 1s infinite' },
+  ragasTable: { width: '100%', borderCollapse: 'collapse', fontSize: 13 },
+  ragasTh: { background: '#f8fafc', padding: '8px 12px', textAlign: 'left', borderBottom: '2px solid #e2e8f0', fontWeight: 600, color: '#475569', whiteSpace: 'nowrap' },
+  ragasTd: { padding: '10px 12px', borderBottom: '1px solid #f1f5f9', verticalAlign: 'middle' },
+  ragasTr: { transition: 'background 0.1s' },
+  ragasNote: { marginTop: 12, fontSize: 11, color: '#94a3b8', lineHeight: 1.6 },
   statsPanel: { background: '#f1f5f9', borderRadius: 8, padding: 16, marginTop: 24 },
   statsTitle: { margin: '0 0 12px', fontSize: 14 },
   statsGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 },
   statCard: { background: 'white', padding: 12, borderRadius: 6, fontSize: 13 },
-  footer: { textAlign: 'center', fontSize: 12, color: '#94a3b8', marginTop: 40, paddingTop: 16, borderTop: '1px solid #e2e8f0' },
 }
 
 export default App

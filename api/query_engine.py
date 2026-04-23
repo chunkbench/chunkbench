@@ -17,7 +17,7 @@ from retrieval import (
     truncate_context, build_context_string, context_token_estimate,
 )
 
-print("Loading BGE-M3 for queries...")
+print("Loading BGE-M3...")
 _embed = BGEM3FlagModel(EMBED_MODEL, use_fp16=False, device="cpu")
 set_embed_model(_embed)
 
@@ -46,7 +46,6 @@ def _load_collections(phase: str) -> dict:
 _collections_phase1 = _load_collections("phase1")
 _collections_phase2 = _load_collections("phase2")
 
-# Demo mode uses Phase 2 indexes
 _collections_demo = _collections_phase2
 
 print(f"Query engine ready. "

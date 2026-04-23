@@ -9,6 +9,7 @@ from typing import Optional
 import asyncio, time, json
 from pathlib import Path
 from query_engine import query_all
+from ragas_eval import compute_ragas_all_strategies
 from config import (RETRIEVAL_K, LLM_TEMPERATURE, LLM_MAX_TOKENS,
                     EMBED_MODEL, RETRIEVAL_METRIC, DEDUP_THRESHOLD,
                     MAX_CONTEXT_CHARS, MAX_CONTEXT_TOKENS, CONTEXT_MODE,
@@ -32,6 +33,13 @@ class QueryRequest(BaseModel):
     dedup:                 bool  = True
     dedup_threshold:       Optional[float] = None
     strategies:            Optional[list[str]] = None
+
+
+class RagasRequest(BaseModel):
+    question:         str
+    mode:             str  = "phase2"
+    strategies:       Optional[list[str]] = None
+    strategy_results: Optional[dict] = None
 
 
 class EvalQuestion(BaseModel):
@@ -151,6 +159,30 @@ async def evaluate(req: EvalRequest):
         "elapsed_s":        round(time.time() - t_start, 1),
         "aggregate":        aggregate,
         "results":          all_results,
+    }
+
+
+@app.post("/ragas")
+async def ragas_endpoint(req: RagasRequest):
+    if not req.question.strip():
+        raise HTTPException(400, "Empty question")
+
+    if req.strategy_results:
+        strategy_results = req.strategy_results
+    else:
+        strats = req.strategies or ["S1", "S2", "S3", "S4", "B0"]
+        query_resp = await query_all(
+            question=req.question, mode=req.mode,
+            strategies=strats,
+        )
+        strategy_results = query_resp["results"]
+
+    ragas_scores = await compute_ragas_all_strategies(req.question, strategy_results)
+
+    return {
+        "question": req.question,
+        "mode":     req.mode,
+        "ragas":    ragas_scores,
     }
 
 

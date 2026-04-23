@@ -46,7 +46,6 @@ def truncate_context_chars(chunks: list[dict], max_chars: int = None) -> list[di
 
 
 def truncate_context_tokens(chunks: list[dict], max_tokens: int = None) -> list[dict]:
-    """1 token ≈ 4 chars."""
     if max_tokens is None:
         max_tokens = MAX_CONTEXT_TOKENS
     kept, total_tokens = [], 0

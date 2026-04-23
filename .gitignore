@@ -29,3 +29,7 @@ s3_partial_grid.json
 # Misc
 .DS_Store
 literatür-havuz/
+
+# Claude session files
+.claude/
+*.tmp.*
